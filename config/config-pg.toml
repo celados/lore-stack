@@ -1,0 +1,41 @@
+# Lore Server Configuration: Postgres + R2 (MinIO) Storage
+# ============================================================
+# Use this config to run loreserver with Postgres for mutable/lock
+# stores and Postgres + MinIO (S3-compatible) for the immutable store.
+#
+# Boot: LORE_CONFIG_PATH=/path/to/this/dir ./loreserver
+# (place this file alongside a default.toml or alongside this file and name it
+#  after LORE_ENVIRONMENT, e.g. "local.toml" to layer on top of defaults)
+
+[immutable_store]
+mode = "pg"
+
+[mutable_store]
+mode = "pg"
+
+[lock_store]
+mode = "pg"
+
+# ---------------------------------------------------------------------
+# Pg Plugin Configuration (shared table — all three stores read from here)
+# ---------------------------------------------------------------------
+[plugins.pg]
+
+# Postgres libpq DSN
+dsn = "host=localhost port=5432 user=postgres password=lore dbname=lore"
+
+# Immutable store: R2/MinIO bucket + endpoint
+s3_bucket           = "lore-fragments"
+s3_endpoint_url     = "http://localhost:9000"
+s3_region           = "us-east-1"
+s3_force_path_style = true
+
+# Immutable store: Postgres table names
+fragments_table = "fragments"
+metadata_table  = "fragments_meta"
+
+# Mutable store table
+mutable_table = "mutable_store"
+
+# Lock store table
+locks_table = "locks"
