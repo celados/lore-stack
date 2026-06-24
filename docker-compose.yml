@@ -1,0 +1,45 @@
+# Intended topology for the self-hosted stack: Postgres + loreserver.
+#
+# ⚠️  PREMATURE UNTIL PHASE 3. Today's loreserver image is STOCK (no PG/R2 plugin),
+#     so it runs in LOCAL mode and IGNORES the postgres service below. Postgres is
+#     declared here for when the lore-pg plugin lands — at which point loreserver
+#     gets a config pointing its mutable/lock/index stores at it (and immutable
+#     payloads at R2). Until then this brings up a working local-mode server + an
+#     idle, ready Postgres.
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: lore
+      POSTGRES_PASSWORD: lore        # dev only — use a real secret in any shared deploy
+      POSTGRES_DB: lore
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U lore"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  loreserver:
+    image: ${LORESERVER_IMAGE:-loreserver:dev}   # set to <dockerhub-user>/loreserver:latest after publish
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "41337:41337"   # gRPC / QUIC
+      - "41339:41339"   # HTTP (health: /health_check)
+    volumes:
+      - loredata:/data
+      - ./config:/config:ro
+    # TODO(phase3): once the pg plugin exists, supply a config that selects
+    #   mode = "pg" for mutable/lock/immutable-index (DSN -> postgres:5432) and
+    #   R2 for immutable payloads. For now loreserver starts zero-config (local).
+    # environment:
+    #   LORE_CONFIG_PATH: /config
+
+volumes:
+  pgdata:
+  loredata:
