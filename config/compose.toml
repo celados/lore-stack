@@ -1,0 +1,19 @@
+# loreserver config for docker-compose: stores addressed by compose service name.
+# Mounted into the container as /config/local.toml.
+[immutable_store]
+mode = "pg"
+[mutable_store]
+mode = "pg"
+[lock_store]
+mode = "pg"
+
+[plugins.pg]
+dsn = "host=postgres port=5432 user=postgres password=lore dbname=lore"
+s3_bucket = "lore-fragments"
+s3_endpoint_url = "http://minio:9000"
+s3_region = "us-east-1"
+s3_force_path_style = true
+fragments_table = "fragments"
+metadata_table = "fragments_meta"
+mutable_table = "mutable_store"
+locks_table = "locks"

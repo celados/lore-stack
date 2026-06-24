@@ -1,0 +1,5 @@
+.build/
+dist/
+
+# Local-only issue tracker — issues live in the workspace, not the public mirror.
+docs/issues/

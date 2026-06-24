@@ -1,0 +1,96 @@
+# Paths are project-root-relative: this project is mirrored to its own GitHub repo
+# (the workspace mirror rule), so projects/lore-stack/ becomes the repo root.
+#
+# Builds happen only on a `v*` tag (cut a release) or a manual run — a cold build
+# is ~8-16 min of 554 deps, and loreserver changes rarely. The build overlays the
+# lore-pg (Postgres + R2) plugin onto pinned upstream Lore via scripts/build.sh.
+name: build-loreserver
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write   # the release job creates/updates GitHub Releases
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            target: x86_64-unknown-linux-gnu
+            runner: ubuntu-latest
+          - arch: arm64
+            target: aarch64-unknown-linux-gnu
+            runner: ubuntu-24.04-arm   # native arm64 — free on public repos, billed on private
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install protoc
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Fetch pinned lore source      # before rust-cache so .build/lore exists to key on
+        run: bash scripts/build.sh fetch
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: .build/lore
+          key: ${{ matrix.arch }}
+      - name: Build loreserver (${{ matrix.arch }})
+        run: TARGET=${{ matrix.target }} bash scripts/build.sh build
+      - run: cp dist/loreserver dist/loreserver-${{ matrix.arch }}
+      - uses: actions/upload-artifact@v7
+        with:
+          name: loreserver-${{ matrix.arch }}
+          path: dist/loreserver-${{ matrix.arch }}
+          retention-days: 1
+
+  # One release job after both arches build — avoids two matrix jobs racing to
+  # create the same release (which also 403'd without contents:write).
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          path: dist
+          merge-multiple: true                  # both arch binaries land flat in dist/
+      - uses: softprops/action-gh-release@v3
+        with:
+          files: |
+            dist/loreserver-amd64
+            dist/loreserver-arm64
+
+  docker:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')   # publish images only on a real release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Docker Hub configured?            # skip cleanly (green) if secrets aren't set
+        id: gate
+        run: echo "on=${{ secrets.DOCKERHUB_USERNAME != '' }}" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v7
+        if: steps.gate.outputs.on == 'true'
+      - uses: actions/download-artifact@v8
+        if: steps.gate.outputs.on == 'true'
+        with:
+          path: dist
+          merge-multiple: true                  # both arch binaries land in dist/
+      - uses: docker/setup-buildx-action@v4
+        if: steps.gate.outputs.on == 'true'
+      - uses: docker/login-action@v4
+        if: steps.gate.outputs.on == 'true'
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}   # set via `gh secret set` — never committed
+      - uses: docker/build-push-action@v7
+        if: steps.gate.outputs.on == 'true'
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64        # COPY-only Dockerfile → no QEMU needed
+          push: true
+          tags: |
+            ${{ secrets.DOCKERHUB_USERNAME }}/loreserver:latest
+            ${{ secrets.DOCKERHUB_USERNAME }}/loreserver:${{ github.ref_name }}

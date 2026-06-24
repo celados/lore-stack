@@ -1,0 +1,51 @@
+[package]
+name = "lore-pg"
+edition = "2024"
+version.workspace = true
+publish = false
+
+[dependencies]
+async-trait = { workspace = true }
+aws-config = { version = "1.8.12", default-features = false, features = ["rt-tokio"] }
+aws-sdk-dynamodb = { version = "1.103.0", default-features = false, features = ["rt-tokio"] }
+aws-sdk-s3 = { version = "1.121.0", default-features = false, features = ["rt-tokio"] }
+aws-smithy-runtime-api = { version = "1.11.3", default-features = false }
+aws-smithy-http-client = { version = "1.1.1", default-features = false, features = ["rustls-ring"] }
+aws-smithy-types = { version = "1.4.3", default-features = false }
+aws-types = { version = "1.3.11", default-features = false }
+bytes = { workspace = true }
+chrono = { workspace = true }
+dashmap = { workspace = true }
+hex = { workspace = true }
+opentelemetry = { workspace = true }
+opentelemetry_sdk = { workspace = true }
+opentelemetry-semantic-conventions = { workspace = true }
+smallvec = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_bytes = { workspace = true }
+serde_dynamo = { version = "4.2.14", features = ["aws-sdk-dynamodb+1"] }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tokio-postgres = { version = "0.7", features = ["with-uuid-1"] }
+deadpool-postgres = { version = "0.14", features = ["rt_tokio_1"] }
+tracing = { workspace = true }
+zerocopy = { workspace = true }
+lore-base = { workspace = true }
+lore-storage = { workspace = true }
+lore-revision = { workspace = true }
+lore-error-set = { workspace = true }
+lore-macro = { workspace = true }
+lore-telemetry = { workspace = true }
+
+[dev-dependencies]
+mockall = { workspace = true }
+rand = { workspace = true }
+serial_test = "3.3.1"
+temp-env = { workspace = true }
+tracing-test = { workspace = true }
+uuid = { workspace = true }
+lore-proto = { workspace = true }
+
+[features]
+default = []
+mocks = []

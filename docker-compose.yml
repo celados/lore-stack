@@ -1,0 +1,65 @@
+# Full self-hosted Lore stack: Postgres + MinIO (R2 stand-in) + loreserver (pg plugin).
+#
+#   ./scripts/compose-up.sh         # downloads the release binary, builds, starts
+#   # then, from the host:
+#   lore repository create lore://127.0.0.1:41337/demo
+#   lore stage <file> && lore commit "msg" && lore push
+#
+# The loreserver image is built from ./Dockerfile (distroless/cc — ships ca-certs,
+# which the rustls provider needs). loreserver reads /config/local.toml.
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: lore        # dev only
+      POSTGRES_DB: lore
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d lore"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  minio:
+    image: minio/minio
+    command: server /data
+    environment:
+      MINIO_ROOT_USER: minio
+      MINIO_ROOT_PASSWORD: minio12345
+    volumes:
+      - miniodata:/data
+
+  # Creates the bucket once MinIO is reachable, then exits.
+  createbucket:
+    image: minio/mc
+    depends_on: [minio]
+    entrypoint: >
+      sh -c "until mc alias set local http://minio:9000 minio minio12345; do sleep 1; done &&
+             mc mb -p local/lore-fragments && echo 'bucket ready'"
+
+  loreserver:
+    build:
+      context: .
+      dockerfile: Dockerfile        # COPYs dist/loreserver-${TARGETARCH}; run scripts/compose-up.sh first
+    depends_on:
+      postgres:
+        condition: service_healthy
+      createbucket:
+        condition: service_completed_successfully
+    environment:
+      LORE_CONFIG_PATH: /config
+      AWS_ACCESS_KEY_ID: minio
+      AWS_SECRET_ACCESS_KEY: minio12345
+      AWS_REGION: us-east-1
+    volumes:
+      - ./config/compose.toml:/config/local.toml:ro
+    ports:
+      - "41337:41337/tcp"   # gRPC
+      - "41337:41337/udp"   # QUIC (push/clone) — UDP, must be published
+      - "41339:41339/tcp"   # HTTP health: /health_check
+
+volumes:
+  pgdata:
+  miniodata:
