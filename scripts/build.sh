@@ -24,15 +24,20 @@ do_fetch() {
   rm -rf "$SRC"; mkdir -p "$BUILD"
   git clone --depth 1 --branch "$LORE_TAG" "$LORE_REPO" "$SRC"
 
-  # Upstream pins the aarch64 target-cpu to neoverse-512tvb (Graviton3+), which
-  # SIGILLs on Apple Silicon / Graviton2 / Ampere. Repoint it at a portable
-  # baseline so the distributed arm64 binary runs on any armv8-a host.
+  # Upstream hardcodes the aarch64 CPU to neoverse-512tvb (Graviton3+, armv8.4)
+  # in TWO kinds of places: .cargo/config.toml rustflags AND lore-base/build.rs's
+  # cc flag for rpmalloc — C allocator code that runs before main(), so a wrong
+  # -mcpu SIGILLs (stlur, armv8.4 LRCPC2) at startup with zero logs on any
+  # armv8.2 host (Neoverse-N1/Ampere/Graviton2; bit us on Hetzner CAX). Sweep
+  # EVERY occurrence in the tree, not just the top-level cargo config.
   ARM64_TARGET_CPU="${ARM64_TARGET_CPU:-generic}"
-  if [ -f "$SRC/.cargo/config.toml" ]; then
-    sed -i.bak "s/target-cpu=neoverse-512tvb/target-cpu=$ARM64_TARGET_CPU/" "$SRC/.cargo/config.toml"
-    rm -f "$SRC/.cargo/config.toml.bak"
-    echo ">> arm64 target-cpu set to '$ARM64_TARGET_CPU' (was neoverse-512tvb)"
-  fi
+  # NB: options BEFORE the directory operand — BSD grep (macOS) silently treats
+  # trailing options as filenames, turning the sweep into a no-op.
+  grep -rl --include="*.toml" --include="*.rs" --exclude-dir=.git \
+    --exclude-dir=target "neoverse-512tvb" "$SRC" 2>/dev/null | while IFS= read -r f; do
+    sed -i.bak "s/neoverse-512tvb/$ARM64_TARGET_CPU/g" "$f" && rm -f "$f.bak"
+    echo ">> arm64 cpu repointed to '$ARM64_TARGET_CPU' in ${f#"$SRC"/}"
+  done
 
   if [ -f "$ROOT/overlay/pg.rs" ]; then
     echo ">> overlaying lore-pg crate + plugins/pg.rs + Cargo wiring"

@@ -36,7 +36,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: .build/lore
-          key: ${{ matrix.arch }}
+          key: ${{ matrix.arch }}-v2   # v2: bust caches built before the tree-wide neoverse-512tvb sweep
       - name: Build loreserver (${{ matrix.arch }})
         run: TARGET=${{ matrix.target }} bash scripts/build.sh build
       - run: cp dist/loreserver dist/loreserver-${{ matrix.arch }}
