@@ -1,0 +1,21 @@
+# loreserver — local single-machine mode (no R2, no Postgres).
+#
+# Companion to compose.toml (docker + PG/MinIO) and config-pg.toml (host PG+MinIO).
+# Simplest path: immutable + mutable + lock stores all on local disk.
+# Sufficient for offline / single-machine use until a remote server is ready.
+#
+# Boot:
+#   scripts/local-up.sh
+# which sets --config to this directory and injects absolute paths via
+# LORE__* env vars (paths cannot live in this committed file because they
+# point at the operator's XDG state dirs, not anything in this repo).
+#
+# Config layering: built-in defaults < default.toml < <env>.toml < local.toml < env vars.
+# We deliberately leave store paths and cert paths unset here — the launcher
+# overrides them through LORE__IMMUTABLE_STORE__LOCAL__PATH etc.
+
+[immutable_store.local]
+flush_delay_seconds = 10
+
+[mutable_store.local]
+flush_delay_seconds = 10

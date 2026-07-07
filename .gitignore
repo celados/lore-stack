@@ -1,5 +1,9 @@
 .build/
 dist/
 
+# Real credentials for the cloud deployment — never commit.
+config/prod.secrets.env
+config/prod.toml
+
 # Local-only issue tracker — issues live in the workspace, not the public mirror.
 docs/issues/

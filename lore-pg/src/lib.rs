@@ -18,6 +18,7 @@ pub mod dynamodb;
 pub mod s3;
 pub mod store;
 pub mod telemetry;
+pub mod tls;
 
 pub type SdkError<E> = ::aws_smithy_runtime_api::client::result::SdkError<
     E,

@@ -28,6 +28,12 @@ thiserror = { workspace = true }
 tokio = { workspace = true }
 tokio-postgres = { version = "0.7", features = ["with-uuid-1"] }
 deadpool-postgres = { version = "0.14", features = ["rt_tokio_1"] }
+# TLS connector for tokio-postgres / deadpool-postgres (see src/tls.rs). `rustls` uses the
+# `ring` crypto provider (not the default `aws-lc-rs`) to match `aws-smithy-http-client`'s
+# `rustls-ring` feature above and avoid pulling in a second crypto backend.
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+rustls-native-certs = "0.8"
+tokio-postgres-rustls = "0.13"
 tracing = { workspace = true }
 zerocopy = { workspace = true }
 lore-base = { workspace = true }

@@ -21,7 +21,17 @@ mode = "pg"
 # ---------------------------------------------------------------------
 [plugins.pg]
 
-# Postgres libpq DSN
+# Postgres libpq DSN.
+#
+# lore-pg always hands tokio_postgres a TLS-capable (rustls) connector, never NoTls, so
+# managed providers that reject plaintext connections (e.g. PlanetScale, SQLSTATE 28000)
+# work out of the box. The DSN's sslmode still controls negotiation: tokio_postgres only
+# parses disable / prefer / require — verify-full is NOT accepted here and will fail to
+# parse. Whenever TLS is negotiated (prefer/require), the connector always verifies the
+# server certificate and hostname against the platform's native root store, which is the
+# closest behavior to verify-full available. Omitting sslmode defaults to prefer, which
+# tries TLS first and falls back to plaintext — this is what keeps the local
+# docker-compose Postgres (no TLS) working with the same connector.
 dsn = "host=localhost port=5432 user=postgres password=lore dbname=lore"
 
 # Immutable store: R2/MinIO bucket + endpoint

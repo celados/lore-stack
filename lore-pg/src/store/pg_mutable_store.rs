@@ -66,11 +66,13 @@ impl PgMutableStore {
     ) -> Result<Arc<Self>, Box<dyn std::error::Error + Send + Sync>> {
         use deadpool_postgres::Config as DeadpoolConfig;
         use deadpool_postgres::Runtime;
-        use tokio_postgres::NoTls;
 
         let mut cfg = DeadpoolConfig::new();
         cfg.url = Some(dsn.to_owned());
-        let pool = cfg.create_pool(Some(Runtime::Tokio1), NoTls)?;
+        // Always TLS-capable connector; DSN sslmode decides whether TLS is actually
+        // negotiated (see crate::tls for why this must not be NoTls).
+        let connector = crate::tls::make_connector()?;
+        let pool = cfg.create_pool(Some(Runtime::Tokio1), connector)?;
         let settings = PgMutableStoreSettings::new(table);
         let store = Arc::new(Self::new(pool, &settings));
         store.ensure_schema().await?;
@@ -445,7 +447,6 @@ mod tests {
     use lore_base::types::Partition;
     use lore_storage::MutableStore;
     use rand::random;
-    use tokio_postgres::NoTls;
 
     use super::PgMutableStore;
     use super::PgMutableStoreSettings;
@@ -454,7 +455,8 @@ mod tests {
         let dsn = std::env::var("PG_TEST_DSN").ok()?;
         let mut cfg = DeadpoolConfig::new();
         cfg.url = Some(dsn);
-        let pool = cfg.create_pool(Some(Runtime::Tokio1), NoTls).ok()?;
+        let connector = crate::tls::make_connector().ok()?;
+        let pool = cfg.create_pool(Some(Runtime::Tokio1), connector).ok()?;
         let settings = PgMutableStoreSettings::new("mutable_store_test");
         let store = Arc::new(PgMutableStore::new(pool.clone(), &settings));
         store.ensure_schema().await.ok()?;

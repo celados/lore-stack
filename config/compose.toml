@@ -8,6 +8,8 @@ mode = "pg"
 mode = "pg"
 
 [plugins.pg]
+# No sslmode set -> defaults to prefer, so this plaintext compose Postgres still works
+# under the TLS-capable connector lore-pg always uses. See config-pg.toml for sslmode details.
 dsn = "host=postgres port=5432 user=postgres password=lore dbname=lore"
 s3_bucket = "lore-fragments"
 s3_endpoint_url = "http://minio:9000"

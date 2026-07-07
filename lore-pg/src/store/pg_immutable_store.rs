@@ -159,12 +159,14 @@ impl PgImmutableStore {
         use aws_types::region::Region;
         use deadpool_postgres::Config as DeadpoolConfig;
         use deadpool_postgres::Runtime;
-        use tokio_postgres::NoTls;
 
         // Postgres connection pool
         let mut cfg = DeadpoolConfig::new();
         cfg.url = Some(dsn.to_owned());
-        let pool = cfg.create_pool(Some(Runtime::Tokio1), NoTls)?;
+        // Always TLS-capable connector; DSN sslmode decides whether TLS is actually
+        // negotiated (see crate::tls for why this must not be NoTls).
+        let connector = crate::tls::make_connector()?;
+        let pool = cfg.create_pool(Some(Runtime::Tokio1), connector)?;
 
         // S3 / R2 client — uses rustls+ring to avoid linking aws-lc-sys.
         // Mirrors the test setup_store pattern exactly.
@@ -1399,7 +1401,6 @@ mod tests {
     use lore_storage::StoreMatch;
     use lore_storage::StoreObliterateStats;
     use rand::random;
-    use tokio_postgres::NoTls;
 
     use super::PgImmutableStore;
     use super::PgImmutableStoreSettings;
@@ -1439,7 +1440,8 @@ mod tests {
 
         let mut cfg = DeadpoolConfig::new();
         cfg.url = Some(dsn);
-        let pool = cfg.create_pool(Some(Runtime::Tokio1), NoTls).ok()?;
+        let connector = crate::tls::make_connector().ok()?;
+        let pool = cfg.create_pool(Some(Runtime::Tokio1), connector).ok()?;
 
         // Build an HTTP client with Rustls+Ring — same as clients.rs — because
         // the default-https-client feature is not enabled in this crate.
