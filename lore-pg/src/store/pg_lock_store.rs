@@ -60,15 +60,9 @@ impl PgLockStore {
         dsn: &str,
         table: &str,
     ) -> Result<Arc<Self>, Box<dyn std::error::Error + Send + Sync>> {
-        use deadpool_postgres::Config as DeadpoolConfig;
-        use deadpool_postgres::Runtime;
-
-        let mut cfg = DeadpoolConfig::new();
-        cfg.url = Some(dsn.to_owned());
-        // Always TLS-capable connector; DSN sslmode decides whether TLS is actually
-        // negotiated (see crate::tls for why this must not be NoTls).
-        let connector = crate::tls::make_connector()?;
-        let pool = cfg.create_pool(Some(Runtime::Tokio1), connector)?;
+        // Size-capped, TLS-capable pool (see crate::tls::make_pool for why the
+        // cap matters on a shared managed-Postgres ceiling).
+        let pool = crate::tls::make_pool(dsn)?;
         let settings = PgLockStoreSettings::new(table);
         let store = Arc::new(Self::new(pool, &settings));
         store.ensure_schema().await?;

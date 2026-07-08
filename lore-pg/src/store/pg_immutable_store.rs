@@ -157,16 +157,10 @@ impl PgImmutableStore {
         use aws_smithy_http_client::tls::rustls_provider::CryptoMode;
         use aws_smithy_runtime_api::client::behavior_version::BehaviorVersion;
         use aws_types::region::Region;
-        use deadpool_postgres::Config as DeadpoolConfig;
-        use deadpool_postgres::Runtime;
 
-        // Postgres connection pool
-        let mut cfg = DeadpoolConfig::new();
-        cfg.url = Some(dsn.to_owned());
-        // Always TLS-capable connector; DSN sslmode decides whether TLS is actually
-        // negotiated (see crate::tls for why this must not be NoTls).
-        let connector = crate::tls::make_connector()?;
-        let pool = cfg.create_pool(Some(Runtime::Tokio1), connector)?;
+        // Size-capped, TLS-capable Postgres pool (see crate::tls::make_pool for
+        // why the cap matters on a shared managed-Postgres ceiling).
+        let pool = crate::tls::make_pool(dsn)?;
 
         // S3 / R2 client — uses rustls+ring to avoid linking aws-lc-sys.
         // Mirrors the test setup_store pattern exactly.
