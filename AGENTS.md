@@ -11,3 +11,6 @@ sits on.
   overlays it onto a pinned Lore checkout and builds `loreserver`.
 - Pinned upstream: **Lore 0.8.3** (matches the binaries installed in `~/.local/bin`).
 - **Clean-break on upgrades:** re-overlay onto the new tag, don't carry shims.
+- **Production deployment** (compose, Dockerfile, TLS/cert automation, secrets
+  templates) lives in `projects/berth/docker/lore/`, not here — this repo only
+  produces the versioned `loreserver` release binary consumed from there.
