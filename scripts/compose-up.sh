@@ -16,7 +16,7 @@ esac
 mkdir -p dist
 if [ ! -f "dist/loreserver-$ARCH" ]; then
   echo ">> downloading latest loreserver-$ARCH from GitHub Releases"
-  curl -fsSL "https://github.com/ethan-huo/lore-stack/releases/latest/download/loreserver-$ARCH" -o "dist/loreserver-$ARCH"
+  curl -fsSL "https://github.com/celados/lore-stack/releases/latest/download/loreserver-$ARCH" -o "dist/loreserver-$ARCH"
 fi
 
 docker compose up --build "$@"
