@@ -4,7 +4,9 @@ FROM rust:bookworm
 # Keep the compiler environment in Docker so each platform uses its native GNU
 # linker instead of relying on host cross-linker state.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends protobuf-compiler \
+    && apt-get install -y --no-install-recommends \
+        libprotobuf-dev \
+        protobuf-compiler \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /work
