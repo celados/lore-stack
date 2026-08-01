@@ -44,6 +44,13 @@ jobs:
             mkdir -p .build/cargo
           fi
 
+      - name: Start container runtime
+        run: |
+          # The runner service survives reboots independently of OrbStack.
+          # Start it explicitly so a queued build does not depend on GUI state.
+          orbctl start
+          docker info
+
       - name: Build Linux release binaries
         run: |
           for spec in \

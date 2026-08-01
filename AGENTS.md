@@ -18,4 +18,5 @@ sits on.
   the celados self-hosted macOS ARM64 runner. Keep release publication and image
   assembly on GitHub-hosted runners; they are cheap glue jobs. The persistent
   `.build/` cache is bounded by the workflow and must never enter Docker's build
-  context.
+  context. CI starts OrbStack explicitly because runner availability does not
+  imply that its Docker daemon is already running.
