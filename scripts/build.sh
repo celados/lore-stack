@@ -18,6 +18,7 @@ TARGET="${TARGET:-x86_64-unknown-linux-gnu}"   # server runs on Linux only
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"       # projects/lore-stack
 BUILD="${BUILD_DIR:-$ROOT/.build}"
 SRC="$BUILD/lore"
+CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$BUILD/target}"
 
 do_fetch() {
   echo ">> fetching lore @ $LORE_TAG"
@@ -70,10 +71,11 @@ do_build() {
   echo ">> building loreserver ($TARGET)"
   cd "$SRC"
   rustup target add "$TARGET" 2>/dev/null || true
-  cargo build --release -p lore-server --bin loreserver --target "$TARGET"
-  strip "target/$TARGET/release/loreserver" 2>/dev/null || true   # shrink the distributed binary (native runner)
+  cargo build --release -p lore-server --bin loreserver --target "$TARGET" \
+    --target-dir "$CARGO_TARGET_DIR"
+  strip "$CARGO_TARGET_DIR/$TARGET/release/loreserver" 2>/dev/null || true
   mkdir -p "$ROOT/dist"
-  cp "target/$TARGET/release/loreserver" "$ROOT/dist/loreserver"
+  cp "$CARGO_TARGET_DIR/$TARGET/release/loreserver" "$ROOT/dist/loreserver"
   echo ">> built: $ROOT/dist/loreserver"
   "$ROOT/dist/loreserver" --version || true
 }

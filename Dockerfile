@@ -1,7 +1,7 @@
-# Runtime image for loreserver. Built multi-arch from prebuilt binaries: the CI
-# matrix compiles loreserver-amd64 / loreserver-arm64 natively, and buildx selects
-# the right one per platform via TARGETARCH. Only COPY uses the target arch, so no
-# QEMU emulation is needed.
+# Runtime image for loreserver. Built multi-arch from prebuilt binaries: CI
+# compiles loreserver-amd64 / loreserver-arm64 in native-platform containers,
+# and buildx selects the right one via TARGETARCH. Runtime image assembly is
+# COPY-only, so the hosted publication job does not compile under emulation.
 #
 # distroless/cc carries glibc + libgcc + ca-certificates — enough for a Rust binary
 # using rustls (no system OpenSSL). If loreserver ever needs more, switch the base

@@ -1,62 +1,98 @@
-# Paths are project-root-relative: this project is mirrored to its own GitHub repo
-# (the workspace mirror rule), so projects/lore-stack/ becomes the repo root.
-#
-# Builds happen only on a `v*` tag (cut a release) or a manual run — a cold build
-# is ~8-16 min of 554 deps, and loreserver changes rarely. The build overlays the
-# lore-pg (Postgres + R2) plugin onto pinned upstream Lore via scripts/build.sh.
+# Paths are project-root-relative: this project is mirrored to its own GitHub repo.
+# The custom server overlays lore-pg onto a pinned upstream Lore checkout.
 name: build-loreserver
+
 on:
   push:
     tags: ['v*']
   workflow_dispatch:
 
+concurrency:
+  group: build-loreserver-${{ github.ref_name }}
+  cancel-in-progress: false
+
 permissions:
-  contents: write   # the release job creates/updates GitHub Releases
+  contents: read
 
 jobs:
   build:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - arch: amd64
-            target: x86_64-unknown-linux-gnu
-            runner: ubuntu-latest
-          - arch: arm64
-            target: aarch64-unknown-linux-gnu
-            runner: ubuntu-24.04-arm   # native arm64 — free on public repos, billed on private
-    runs-on: ${{ matrix.runner }}
+    # Linux binaries are compiled in per-platform Docker containers on the Mac
+    # mini. This keeps the expensive Rust work off GitHub-hosted runners.
+    runs-on: [self-hosted, macOS, ARM64]
+    timeout-minutes: 180
+    env:
+      CARGO_BUILD_JOBS: 6
     steps:
       - uses: actions/checkout@v7
-      - name: Install protoc
-        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
-      - uses: dtolnay/rust-toolchain@stable
-      - name: Fetch pinned lore source      # before rust-cache so .build/lore exists to key on
-        run: bash scripts/build.sh fetch
-      - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: .build/lore
-          key: ${{ matrix.arch }}-v2   # v2: bust caches built before the tree-wide neoverse-512tvb sweep
-      - name: Build loreserver (${{ matrix.arch }})
-        run: TARGET=${{ matrix.target }} bash scripts/build.sh build
-      - run: cp dist/loreserver dist/loreserver-${{ matrix.arch }}
+          persist-credentials: false
+          # target/ and Cargo's registry are the persistent cache. The default
+          # git clean would erase both before every build.
+          clean: false
+
+      - name: Prepare persistent workspace
+        run: |
+          rm -rf dist
+          mkdir -p .build/cargo
+
+          limit_gb=40
+          size_gb="$(du -sg .build 2>/dev/null | cut -f1 || echo 0)"
+          echo ".build is ${size_gb:-0} GB (limit ${limit_gb} GB)"
+          if [ "${size_gb:-0}" -gt "$limit_gb" ]; then
+            echo "clearing .build for a bounded cold rebuild"
+            rm -rf .build
+            mkdir -p .build/cargo
+          fi
+
+      - name: Build Linux release binaries
+        run: |
+          for spec in \
+            "arm64:aarch64-unknown-linux-gnu" \
+            "amd64:x86_64-unknown-linux-gnu"
+          do
+            arch="${spec%%:*}"
+            target="${spec#*:}"
+            image="celados-lore-stack-builder:$arch"
+
+            docker build \
+              --platform "linux/$arch" \
+              --file docker/build.Dockerfile \
+              --tag "$image" \
+              docker
+
+            docker run --rm \
+              --platform "linux/$arch" \
+              --env BUILD_DIR="/work/.build/$arch" \
+              --env CARGO_BUILD_JOBS \
+              --env CARGO_HOME="/work/.build/cargo" \
+              --env TARGET="$target" \
+              --volume "$GITHUB_WORKSPACE:/work" \
+              --workdir /work \
+              "$image" \
+              bash scripts/build.sh
+
+            cp dist/loreserver "dist/loreserver-$arch"
+          done
+
       - uses: actions/upload-artifact@v7
         with:
-          name: loreserver-${{ matrix.arch }}
-          path: dist/loreserver-${{ matrix.arch }}
+          name: loreserver-linux
+          path: |
+            dist/loreserver-amd64
+            dist/loreserver-arm64
           retention-days: 1
 
-  # One release job after both arches build — avoids two matrix jobs racing to
-  # create the same release (which also 403'd without contents:write).
   release:
     needs: build
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/download-artifact@v8
         with:
+          name: loreserver-linux
           path: dist
-          merge-multiple: true                  # both arch binaries land flat in dist/
       - uses: softprops/action-gh-release@v3
         with:
           files: |
@@ -65,10 +101,10 @@ jobs:
 
   docker:
     needs: build
-    if: startsWith(github.ref, 'refs/tags/v')   # publish images only on a real release
+    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     steps:
-      - name: Docker Hub configured?            # skip cleanly (green) if secrets aren't set
+      - name: Docker Hub configured?
         id: gate
         run: echo "on=${{ secrets.DOCKERHUB_USERNAME != '' }}" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@v7
@@ -76,20 +112,20 @@ jobs:
       - uses: actions/download-artifact@v8
         if: steps.gate.outputs.on == 'true'
         with:
+          name: loreserver-linux
           path: dist
-          merge-multiple: true                  # both arch binaries land in dist/
       - uses: docker/setup-buildx-action@v4
         if: steps.gate.outputs.on == 'true'
       - uses: docker/login-action@v4
         if: steps.gate.outputs.on == 'true'
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}   # set via `gh secret set` — never committed
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
       - uses: docker/build-push-action@v7
         if: steps.gate.outputs.on == 'true'
         with:
           context: .
-          platforms: linux/amd64,linux/arm64        # COPY-only Dockerfile → no QEMU needed
+          platforms: linux/amd64,linux/arm64
           push: true
           tags: |
             ${{ secrets.DOCKERHUB_USERNAME }}/loreserver:latest
