@@ -2,8 +2,8 @@
 type: Design
 title: lore-stack — self-hosted Lore for ~/workspace (R2 + Postgres)
 status: draft
-version: 0.1
-timestamp: 2026-06-23T00:00:00Z
+version: 0.2
+timestamp: 2026-08-01T00:00:00Z
 ---
 
 # lore-stack
@@ -14,8 +14,8 @@ key-value store with compare-and-swap), with **no AWS dependency**.
 
 ## What is installed today
 
-- `lore 0.8.3+201` and `loreserver 0.8.3` in `~/.local/bin` (from the official
-  GitHub release, platform `aarch64-apple-darwin`).
+- The supported client/server baseline is Lore **0.8.6**. `scripts/build.sh`
+  overlays the Postgres + R2 plugin onto the exact `v0.8.6` upstream tag.
 - The stock `loreserver` runs **zero-config in `local` mode** (immutable + mutable
   + lock stores all on local disk; `notification.mode = local` = in-process
   broadcast). Good enough for local development right now — **no R2/PG needed to
@@ -36,8 +36,7 @@ plugins; selecting `mode = "aws"` etc. fails at startup with `PluginNotFound`.
 **Our approach — overlay, not hard fork.** This project holds only *our* authored
 plugin source plus a build recipe. The recipe:
 
-1. checks out Lore at a **pinned tag** (target: the 0.8.3 release matching our
-   binaries — exact tag string TBD),
+1. checks out Lore at the **pinned `v0.8.6` tag**,
 2. copies `plugins/*.rs` into `lore-server/src/plugins/`,
 3. wires the extra crate deps (Postgres + S3 client) into the build,
 4. `cargo build -p lore-server` → our `loreserver`.
@@ -73,8 +72,8 @@ projects/lore-stack/
 
 ## Open questions to resolve before coding
 
-1. **Pin the exact upstream tag** for 0.8.3 and decide vendoring mechanism
-   (git submodule vs shallow fetch in the build recipe).
+1. **Upgrade discipline** — re-overlay against each selected upstream tag,
+   compile the complete custom server, then validate production protocols before rollout.
 2. **Plugin config schema** — the `[plugins.<name>]` keys our PG/R2 plugin reads
    (the plugin owns its own config parsing).
 3. **Where PG and R2 live** — managed Postgres (Neon/Supabase) + R2 bucket; creds

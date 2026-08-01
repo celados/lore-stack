@@ -9,7 +9,7 @@ sits on.
 - Lore is **vendored/overlaid, not forked wholesale** — see the design doc's
   *Plugin build model*. Authored plugin source lives in `plugins/`; a build recipe
   overlays it onto a pinned Lore checkout and builds `loreserver`.
-- Pinned upstream: **Lore 0.8.3** (matches the binaries installed in `~/.local/bin`).
+- Pinned upstream: **Lore 0.8.6**.
 - **Clean-break on upgrades:** re-overlay onto the new tag, don't carry shims.
 - **Production deployment** (compose, Dockerfile, TLS/cert automation, secrets
   templates) lives in `projects/berth/docker/lore/`, not here — this repo only

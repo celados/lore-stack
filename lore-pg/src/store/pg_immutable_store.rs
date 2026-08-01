@@ -1298,6 +1298,7 @@ impl ImmutableStoreTrait for PgImmutableStore {
         self: Arc<Self>,
         _max_capacity: usize,
         _sync_data: bool,
+        _sink: Option<lore_storage::gc_event::GcEventSinkRef>,
     ) -> Result<usize, StoreError> {
         // Remote store never evicts.
         Ok(0)
@@ -1308,6 +1309,7 @@ impl ImmutableStoreTrait for PgImmutableStore {
         _max_size: usize,
         _at: Option<usize>,
         _sync_data: bool,
+        _sink: Option<lore_storage::gc_event::GcEventSinkRef>,
     ) -> Result<Option<usize>, StoreError> {
         Ok(None)
     }

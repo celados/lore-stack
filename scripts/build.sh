@@ -11,7 +11,7 @@
 # from the pinned source — proving the fetch+build pipeline (design Phase 2).
 set -euo pipefail
 
-LORE_TAG="${LORE_TAG:-v0.8.3}"                 # pin to the installed binaries
+LORE_TAG="${LORE_TAG:-v0.8.6}"                 # server/client release baseline
 LORE_REPO="${LORE_REPO:-https://github.com/EpicGames/lore.git}"
 TARGET="${TARGET:-x86_64-unknown-linux-gnu}"   # server runs on Linux only
 
