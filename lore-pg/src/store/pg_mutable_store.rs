@@ -126,7 +126,10 @@ impl PgMutableStore {
         repository: Context,
         key: Hash,
     ) -> Result<Hash, StoreError> {
-        match self.fetch_current(repository.as_ref(), key.as_bytes()).await? {
+        match self
+            .fetch_current(repository.as_ref(), key.as_bytes())
+            .await?
+        {
             Some(value) if !value.is_zero() => Ok(value),
             _ => Err(StoreError::from(AddressNotFound::from(
                 Address::zero_context_hash(key),
@@ -186,91 +189,76 @@ impl PgMutableStore {
         expected: Hash,
         value: Hash,
     ) -> Result<Hash, StoreError> {
-        let client = self.pool.get().await.map_err(|e| {
+        let mut client = self.pool.get().await.map_err(|e| {
             warn!("PgMutableStore: pool checkout failed: {e}");
             StoreError::internal(format!("pg pool error: {e}"))
         })?;
-
         let repo_bytes: Vec<u8> = repository.as_ref().to_vec();
         let key_bytes: Vec<u8> = key.as_bytes().to_vec();
         let value_bytes: Vec<u8> = value.as_bytes().to_vec();
+        let txn = client.transaction().await.map_err(|e| {
+            warn!("PgMutableStore: CAS BEGIN failed: {e}");
+            StoreError::internal(format!("pg cas begin error: {e}"))
+        })?;
 
-        if expected.is_zero() {
-            // Insert-if-absent: a single CTE is atomic — no read-after-write race.
-            // On insert success the RETURNING clause gives back the inserted value; the
-            // CASE picks $4 (zero/expected) to signal "prior value was zero".
-            // On conflict (row already present) the subquery returns the current value.
-            let sql = format!(
-                "WITH ins AS (
-                     INSERT INTO {t} (repository_id, key, value) VALUES ($1, $2, $3)
-                     ON CONFLICT (repository_id, key) DO NOTHING
-                     RETURNING value
-                 )
-                 SELECT CASE WHEN EXISTS(SELECT 1 FROM ins)
-                             THEN $4
-                             ELSE (SELECT value FROM {t} WHERE repository_id = $1 AND key = $2)
-                        END",
-                t = self.table_name
+        // Row locks cannot protect an absent key. A transaction-scoped advisory lock
+        // serializes that case too, while hash collisions only reduce concurrency.
+        txn.query_one(
+            "SELECT pg_advisory_xact_lock(hashtextextended(encode($1::bytea || $2::bytea, 'hex'), 0))",
+            &[&repo_bytes.as_slice(), &key_bytes.as_slice()],
+        )
+        .await
+        .map_err(|e| {
+            warn!("PgMutableStore: CAS key lock failed: {e}");
+            StoreError::internal(format!("pg cas lock error: {e}"))
+        })?;
+
+        let select_sql = format!(
+            "SELECT value FROM {table} WHERE repository_id = $1 AND key = $2",
+            table = self.table_name
+        );
+        let current = txn
+            .query_opt(
+                &select_sql,
+                &[&repo_bytes.as_slice(), &key_bytes.as_slice()],
+            )
+            .await
+            .map_err(|e| {
+                warn!("PgMutableStore: CAS SELECT failed: {e}");
+                StoreError::internal(format!("pg cas select error: {e}"))
+            })?
+            .map(|row| hash_from_bytes(&row.get::<_, Vec<u8>>(0)))
+            .transpose()?
+            .unwrap_or_default();
+
+        if current == expected {
+            // CAS deliberately preserves a zero value: Lore initializes an empty branch
+            // with CAS(0 -> 0), then advances it with CAS(0 -> first revision).
+            let upsert_sql = format!(
+                "INSERT INTO {table} (repository_id, key, value) VALUES ($1, $2, $3)
+                 ON CONFLICT (repository_id, key) DO UPDATE SET value = EXCLUDED.value",
+                table = self.table_name
             );
-            // $4 = zero bytes (the expected/prior value when insert succeeds)
-            let zero_bytes: Vec<u8> = expected.as_bytes().to_vec();
-            let row = client
-                .query_one(
-                    &sql,
-                    &[
-                        &repo_bytes.as_slice(),
-                        &key_bytes.as_slice(),
-                        &value_bytes.as_slice(),
-                        &zero_bytes.as_slice(),
-                    ],
-                )
-                .await
-                .map_err(|e| {
-                    warn!("PgMutableStore: CAS insert-if-absent failed: {e}");
-                    StoreError::internal(format!("pg cas insert error: {e}"))
-                })?;
-            let bytes: Vec<u8> = row.get(0);
-            hash_from_bytes(&bytes)
-        } else {
-            // Update-if-matches: single CTE, one round-trip, atomic.
-            // On match the RETURNING clause gives back $4 (expected / prior value).
-            // On mismatch the subquery returns the current value, or $5 (zero) if row absent.
-            let expected_bytes: Vec<u8> = expected.as_bytes().to_vec();
-            let zero_bytes: Vec<u8> = Hash::default().as_bytes().to_vec();
-            let sql = format!(
-                "WITH upd AS (
-                     UPDATE {t} SET value = $3
-                     WHERE repository_id = $1 AND key = $2 AND value = $4
-                     RETURNING value
-                 )
-                 SELECT CASE WHEN EXISTS(SELECT 1 FROM upd)
-                             THEN $4
-                             ELSE COALESCE(
-                                     (SELECT value FROM {t} WHERE repository_id = $1 AND key = $2),
-                                     $5
-                                  )
-                        END",
-                t = self.table_name
-            );
-            let row = client
-                .query_one(
-                    &sql,
-                    &[
-                        &repo_bytes.as_slice(),
-                        &key_bytes.as_slice(),
-                        &value_bytes.as_slice(),
-                        &expected_bytes.as_slice(),
-                        &zero_bytes.as_slice(),
-                    ],
-                )
-                .await
-                .map_err(|e| {
-                    warn!("PgMutableStore: CAS update failed: {e}");
-                    StoreError::internal(format!("pg cas update error: {e}"))
-                })?;
-            let bytes: Vec<u8> = row.get(0);
-            hash_from_bytes(&bytes)
+            txn.execute(
+                &upsert_sql,
+                &[
+                    &repo_bytes.as_slice(),
+                    &key_bytes.as_slice(),
+                    &value_bytes.as_slice(),
+                ],
+            )
+            .await
+            .map_err(|e| {
+                warn!("PgMutableStore: CAS write failed: {e}");
+                StoreError::internal(format!("pg cas write error: {e}"))
+            })?;
         }
+
+        txn.commit().await.map_err(|e| {
+            warn!("PgMutableStore: CAS COMMIT failed: {e}");
+            StoreError::internal(format!("pg cas commit error: {e}"))
+        })?;
+        Ok(current)
     }
 
     fn list_typed(
@@ -314,7 +302,10 @@ impl PgMutableStore {
             let key_start_ref: &[u8] = &key_start;
             let key_end_ref: &[u8] = &key_end;
             let rows = match client
-                .query(&sql, &[&repo_bytes.as_slice(), &key_start_ref, &key_end_ref])
+                .query(
+                    &sql,
+                    &[&repo_bytes.as_slice(), &key_start_ref, &key_end_ref],
+                )
                 .await
             {
                 Ok(rows) => rows,
@@ -490,6 +481,40 @@ mod tests {
         assert_eq!(loaded, value);
     }
 
+    /// Branch creation initializes latest with CAS(0 -> 0); the first push must
+    /// still treat that stored zero as matching CAS(0 -> revision).
+    #[tokio::test]
+    #[ignore]
+    async fn test_compare_and_swap_replaces_stored_zero() {
+        let store = setup_store().await.expect("PG_TEST_DSN not set");
+        let partition: Partition = random::<[u8; 16]>().into();
+        let key = random::<Hash>();
+        let value = random::<Hash>();
+        let key_type = KeyType::BranchLatestPointer;
+
+        let initial = store
+            .clone()
+            .compare_and_swap(partition, key, Hash::default(), Hash::default(), key_type)
+            .await
+            .expect("initialize branch latest");
+        assert_eq!(initial, Hash::default());
+
+        let prior = store
+            .clone()
+            .compare_and_swap(partition, key, Hash::default(), value, key_type)
+            .await
+            .expect("advance branch latest");
+        assert_eq!(prior, Hash::default());
+        assert_eq!(
+            store
+                .clone()
+                .load(partition, key, key_type)
+                .await
+                .expect("load advanced branch latest"),
+            value
+        );
+    }
+
     /// CAS insert-if-absent fails when a row already exists — returns the existing value.
     #[tokio::test]
     #[ignore]
@@ -570,5 +595,21 @@ mod tests {
             .expect("CAS should not error");
         // Existing value != expected -> return the existing value.
         assert_eq!(witness, actual_value);
+    }
+
+    #[tokio::test]
+    #[ignore = "requires PG_TEST_DSN"]
+    async fn satisfies_mutable_store_conformance() {
+        let store = setup_store().await.expect("PG_TEST_DSN not set");
+        lore_storage::mutable_conformance::verify_mutable_store(
+            store,
+            lore_storage::mutable_conformance::Capabilities::new("PgMutableStore")
+                .known_violations(&[
+                    // The current schema is partition-keyed; a null partition is not a
+                    // privileged cross-tenant scan and therefore cannot list every partition.
+                    lore_storage::mutable_conformance::Check::ListNullPartitionMatchesAll,
+                ]),
+        )
+        .await;
     }
 }

@@ -1,5 +1,6 @@
 .build/
 dist/
+deploy/oh/.env
 
 # Real credentials for the cloud deployment — never commit.
 config/prod.secrets.env

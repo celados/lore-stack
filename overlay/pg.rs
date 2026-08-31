@@ -1,9 +1,9 @@
 // SPDX-FileCopyrightText: 2026 Epic Games, Inc.
 // SPDX-License-Identifier: MIT
-//! Postgres + R2 (S3-compatible) store plugin factories.
+//! Postgres + core S3-compatible store plugin factories.
 //!
-//! This module provides plugin factories for Postgres/R2-backed stores:
-//! - [`PgImmutableStorePluginFactory`] - Creates Postgres+R2-backed immutable stores
+//! This module provides plugin factories for Postgres/S3-backed stores:
+//! - [`PgImmutableStorePluginFactory`] - Creates Postgres+S3-backed immutable stores
 //! - [`PgMutableStorePluginFactory`] - Creates Postgres-backed mutable stores
 //! - [`PgLockStorePluginFactory`] - Creates Postgres-backed lock stores
 //!
@@ -43,18 +43,18 @@ pub struct PgImmutableStorePluginConfig {
     /// libpq DSN, e.g. "host=localhost user=postgres password=secret dbname=lore"
     pub dsn: String,
 
-    /// R2/S3 bucket name for storing fragment payloads.
+    /// S3 bucket name for storing fragment payloads.
     pub s3_bucket: String,
 
-    /// Optional S3/R2 endpoint URL (required for non-AWS services like MinIO or R2).
+    /// Optional endpoint URL for non-AWS S3-compatible services.
     #[serde(default)]
     pub s3_endpoint_url: Option<String>,
 
-    /// Optional AWS region (defaults to "auto" for R2).
+    /// Optional AWS region (defaults to "auto" for custom endpoints).
     #[serde(default)]
     pub s3_region: Option<String>,
 
-    /// Force S3 path-style addressing — required for R2/MinIO behind non-AWS hostnames.
+    /// Force S3 path-style addressing for compatible services without virtual-host buckets.
     #[serde(default = "default_true")]
     pub s3_force_path_style: bool,
 
@@ -118,7 +118,7 @@ fn default_locks_table() -> String {
 // Plugin Factory Implementations
 // =============================================================================
 
-/// Plugin factory for creating Postgres+R2 immutable stores.
+/// Plugin factory for creating Postgres+S3 immutable stores.
 pub struct PgImmutableStorePluginFactory;
 
 impl ImmutableStorePluginFactory for PgImmutableStorePluginFactory {

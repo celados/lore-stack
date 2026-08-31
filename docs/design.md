@@ -1,122 +1,104 @@
 ---
 type: Design
-title: lore-stack — self-hosted Lore for ~/workspace (R2 + Postgres)
-status: draft
-version: 0.2
-timestamp: 2026-08-01T00:00:00Z
+title: lore-stack self-hosted server build
+description: Custom Lore server build with PostgreSQL metadata and core S3-compatible payload storage.
+status: active
+version: 0.5
+generated: { by: codex/gpt-5, at: 2026-08-31T00:00:00Z }
 ---
 
 # lore-stack
 
-The storage substrate for `~/workspace`: a self-hosted Lore server whose durable
-backend is **Cloudflare R2** (blob bytes) + **Postgres** (everything that needs a
-key-value store with compare-and-swap), with **no AWS dependency**.
+This repository owns the custom `loreserver` binary and the single-node Compose
+deployment used by the self-hosted Lore stack. Credentials remain in
+Vaultwarden and are rendered only on the operator and OH hosts.
 
-## What is installed today
+## Supported baseline
 
-- The supported client/server baseline is Lore **0.8.6**. `scripts/build.sh`
-  overlays the Postgres + R2 plugin onto the exact `v0.8.6` upstream tag.
-- The stock `loreserver` runs **zero-config in `local` mode** (immutable + mutable
-  + lock stores all on local disk; `notification.mode = local` = in-process
-  broadcast). Good enough for local development right now — **no R2/PG needed to
-  start building conventions and actions.**
+- Upstream source: [`EpicGames/lore` tag `v0.9.0`](https://github.com/EpicGames/lore/releases/tag/v0.9.0).
+- Upgrade policy: clean re-overlay onto the pinned tag; no compatibility shim for
+  older Lore storage traits.
+- `scripts/build.sh` always overlays `lore-pg` and `overlay/pg.rs`; a missing
+  plugin is a build error rather than a silent stock-server fallback.
+- Upstream's `v0.9.0` tag still declares Cargo package version
+  `0.8.7-nightly`. The custom build injects `LORE_BUILD_VERSION_NAME=v0.9.0`,
+  so server startup reports the complete identity `0.8.7-nightly+v0.9.0` even
+  though Clap's short `--version` output shows only the package version.
 
-## Decisive constraint: the plugin build model
+## Storage boundary
 
-Lore's cloud backends are **plugins compiled into the server binary, not loaded at
-runtime**. `lore-server/build.rs` auto-generates `register_all_plugins()` by
-scanning `lore-server/src/plugins/*.rs` (`cargo:rerun-if-changed=src/plugins`), and
-each plugin factory implements traits from `crate::plugins::traits` — i.e. the
-lore-server crate's *internal* traits. The stock `loreserver` registers **no**
-plugins; selecting `mode = "aws"` etc. fails at startup with `PluginNotFound`.
-
-**Implication:** an R2/PG backend cannot be an out-of-tree crate. It must be a
-`.rs` file inside `lore-server/src/plugins/`, built into a custom `loreserver`.
-
-**Our approach — overlay, not hard fork.** This project holds only *our* authored
-plugin source plus a build recipe. The recipe:
-
-1. checks out Lore at the **pinned `v0.8.6` tag**,
-2. copies `plugins/*.rs` into `lore-server/src/plugins/`,
-3. wires the extra crate deps (Postgres + S3 client) into the build,
-4. `cargo build -p lore-server` → our `loreserver`.
-
-On upstream upgrades we **re-overlay onto the new tag and clean-break** — no shims.
-
-## Target backend map
-
-| Stores what | Backend | Work |
+| Data | Backend | Required semantics |
 | --- | --- | --- |
-| immutable fragment **payload bytes** | **R2** | reuse lore-aws's S3 client via `s3_endpoint_url` + path-style |
-| immutable **index / metadata** | **Postgres** | port lore-aws's DynamoDB index to PG |
-| mutable store (branch pointers, **CAS**) | **Postgres** | `MutableStore` trait: `load/store/compare_and_swap/list/flush`; CAS = conditional write |
-| lock store | **Postgres** | `LockStore` trait: `lock_resources/query_locks/check_locks_status/unlock_resources` |
+| Immutable payload bytes | Core S3-compatible object store | `GetObject`, `PutObject`, `DeleteObject`, path-style endpoint support |
+| Immutable association and metadata index | PostgreSQL | Partition-isolated exact matches and tombstone-safe obliteration |
+| Mutable pointers | PostgreSQL | Atomic compare-and-swap |
+| Distributed locks | PostgreSQL | Transactional ownership checks |
 
-Reference implementation to port from: the `lore-aws` crate (keep its S3 half →
-point at R2; rewrite its DynamoDB half → Postgres). Footprint: **one managed
-Postgres + one R2 bucket**, zero AWS.
+The OH deployment uses Silo's immutable
+`RELEASE.2026-08-06T00-00-00Z` image. It remains a deployment choice behind the
+core S3 boundary; the storage plugin does not depend on Silo-specific APIs.
 
-## Planned project layout
+## Plugin build model
 
-```
-projects/lore-stack/
-  AGENTS.md
-  docs/design.md          # this doc
-  plugins/                # authored plugin source (overlaid into lore-server/src/plugins/)
-  config/                 # loreserver TOML (local dev; cloud R2+PG)
-  scripts/build.sh        # the overlay + build recipe
-  .action/                # build / deploy actions
-```
+Lore discovers store factories at compile time from
+`lore-server/src/plugins/*.rs`; these are not runtime-loadable plugins.
+`scripts/build.sh` therefore:
 
-(Only `AGENTS.md` + `docs/` exist so far; the rest is created when we write code.)
+1. clones the pinned upstream tag;
+2. overlays this repository's `lore-pg` crate and `pg.rs` factory;
+3. wires the crate into the fetched Cargo workspace;
+4. builds the complete `loreserver` binary.
 
-## Open questions to resolve before coding
+The root Compose file assembles the release binary, PostgreSQL 17, and Silo.
+PostgreSQL and Silo have no host ports and remain only on an internal backend
+network. Lore also joins a narrow edge bridge so Docker can publish the
+configured Tailscale address, while its HTTP health endpoint binds localhost.
+The deployment uses named volumes so restarts and image upgrades do not replace
+data.
 
-1. **Upgrade discipline** — re-overlay against each selected upstream tag,
-   compile the complete custom server, then validate production protocols before rollout.
-2. **Plugin config schema** — the `[plugins.<name>]` keys our PG/R2 plugin reads
-   (the plugin owns its own config parsing).
-3. **Where PG and R2 live** — managed Postgres (Neon/Supabase) + R2 bucket; creds
-   handling (the aws plugin pulls creds from the SDK default chain, not config).
-4. **Auth** — JWKS endpoint (OIDC provider) vs mTLS for the public QUIC/gRPC.
-5. **Does `local` mode unblock all early work?** (Almost certainly yes — build the
-   R2/PG plugin in parallel, not on the critical path to conventions/actions.)
+`deploy/oh/.env.tpl` is the committed credential reference. The rendered `.env`
+is mode `0600`, ignored by Git, and transferred to OH by `scripts/deploy-oh.sh`.
+The script deliberately does not change Tailscale, Mihomo, DNS, or the HZ stack.
+It synchronizes the authored overlay to OH and builds the Linux amd64 binary
+there before starting Compose. The build containers use host networking only so
+they can reach OH's existing loopback-only Mihomo proxy; no proxy listener or
+route is changed.
 
-## Build phases (dependency order)
+## Lore 0.9 storage contract
 
-1. Confirm `local`-mode server runs end-to-end (repo create / add / commit / push)
-   — gives a working Lore to develop conventions against now.
-2. Stand up the overlay build recipe against the pinned tag, producing a stock
-   `loreserver` from source (no custom plugin yet) — proves the build path.
-3. Write the Postgres `MutableStore` + `LockStore` plugin; test CAS/locking.
-4. Write the R2 + Postgres `ImmutableStore` plugin (S3→R2 + DynamoDB→PG index).
-5. Cloud deploy + auth; point a client at it; wire the notification-stream bridge.
+The durable PG/S3 store isolates partitions and deliberately reports only exact
+`MatchFull` associations. Reporting sibling-context `MatchPartition` without
+per-address tombstones makes an obliterated address appear to exist when another
+context still references the same hash. Lore permits stores to under-report, and
+the upstream AWS store makes the same conservative choice.
 
-## Verified findings (2026-06-23, against the 0.8.3 source)
+`copy` still accepts a zero-context source and resolves any association in the
+named source partition. This preserves the explicit copy contract without making
+unsafe claims during `query`.
 
-- **Registration model confirmed.** `lore-aws` is a pure store-impl crate (deps:
-  lore-storage/lore-revision/lore-proto; **no lore-server dep**) implementing the
-  public store traits. The factory glue lives in `lore-server/src/plugins/aws.rs`
-  (**715 lines** — implements the internal `*PluginFactory` traits, parses config,
-  calls `register_*_plugin`). So: copy `lore-aws` → our `lore-pg`; adapt `aws.rs`
-  → `overlay/pg.rs`. Vendored as `lore-pg/` (see its `REWRITE.md`).
+The active implementations are:
 
-- **Effort corrected: ~60% rewrite, not 10%.** The S3→R2 side is genuinely small
-  (~2000 of 8955 lines kept). The DynamoDB→Postgres side is ~6000 lines re-authored
-  (lock_store 1989 + mutable_store 986 + dynamodb 914 + immutable_store's Dynamo
-  index ~2300). Easier than the original (PG has real txns/locks) but a real
-  implementation project.
+- `PgImmutableStore` for PostgreSQL index plus S3 payloads;
+- `PgMutableStore` for PostgreSQL mutable values;
+- `PgLockStore` for PostgreSQL locks.
 
-- **R2 compat is small but not zero.** S3 ops used are all R2-supported. Two fixes:
-  (1) `list_versions`/ListObjectVersions is unsupported by R2 — avoid/stub it;
-  (2) set `request_checksum_calculation = WhenRequired` (aws-sdk-s3 default
-  flexible checksums can trip R2).
+The copied DynamoDB implementations and their SDK dependencies were removed in
+the 0.9 upgrade because no runtime path used them.
 
-- **Build shape confirmed.** `lore-pg` uses `{ workspace = true }` deps → it must
-  build **as a member of the fetched Lore workspace**. `scripts/build.sh` is the
-  overlay recipe; `.github/workflows/release.yml` runs it on `ubuntu-latest`
-  (Linux-only server, single target). Client stays on official prebuilt `lore`.
+## Verification gate
 
-- **Current milestone (Phase 2):** `build.sh` builds a **stock** loreserver from
-  the pinned tag until `overlay/pg.rs` exists — this proves the fetch+build+release
-  pipeline. The lore-pg rewrite + `pg.rs` glue are Phase 3–4.
+An upstream upgrade is complete only when all of the following pass:
+
+1. the full custom `loreserver` compiles from the pinned tag;
+2. Lore's immutable and mutable conformance batteries pass against disposable
+   real PostgreSQL and S3-compatible services;
+3. all PG lock and mutable integration tests pass;
+4. the release binary starts with the PG plugin, creates all four tables, and
+   returns HTTP 200 from `/health_check` with store health checking enabled.
+
+The 0.9.0 upgrade and OH deployment passed this gate on 2026-08-31. The release
+binary was built on OH, all 21 PG/S3 tests passed there, and both Lore 0.9.0 and
+the installed 0.8.6 client completed create, commit, push, clone, and byte-level
+comparison through the Tailscale address. A full PostgreSQL, Silo, and Lore
+restart preserved the pushed revision. DNS cutover and HZ drain remain separate
+operations.

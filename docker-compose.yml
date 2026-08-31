@@ -1,48 +1,62 @@
-# Full self-hosted Lore stack: Postgres + MinIO (R2 stand-in) + loreserver (pg plugin).
-#
-#   ./scripts/compose-up.sh         # downloads the release binary, builds, starts
-#   # then, from the host:
-#   lore repository create lore://127.0.0.1:41337/demo
-#   lore stage <file> && lore commit "msg" && lore push
-#
-# The loreserver image is built from ./Dockerfile (distroless/cc — ships ca-certs,
-# which the rustls provider needs). loreserver reads /config/local.toml.
+name: lore-stack
+
 services:
   postgres:
-    image: postgres:17
+    image: postgres:17.11-bookworm@sha256:051f7b7b3abdd564d5d1bd1e8c4b9c1b6e77087d1dd22020ede611c096a272e0
+    restart: unless-stopped
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: lore        # dev only
+      POSTGRES_USER: lore
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?render deploy/oh/.env first}
       POSTGRES_DB: lore
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d lore"]
-      interval: 3s
-      timeout: 3s
+      test: ["CMD-SHELL", "pg_isready -U lore -d lore"]
+      interval: 5s
+      timeout: 5s
       retries: 20
     volumes:
       - pgdata:/var/lib/postgresql/data
+    networks: [backend]
 
-  minio:
-    image: minio/minio
-    command: server /data
+  silo:
+    image: pgsty/silo:RELEASE.2026-08-06T00-00-00Z@sha256:29a498b24669cae1fed11c1a2fb2b3d73c68829a0a9c0b14e71b386671d38fac
+    command: server /data --console-address :9001
+    restart: unless-stopped
     environment:
-      MINIO_ROOT_USER: minio
-      MINIO_ROOT_PASSWORD: minio12345
+      MINIO_ROOT_USER: ${S3_ACCESS_KEY:?render deploy/oh/.env first}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY:?render deploy/oh/.env first}
+      MINIO_UPDATE: "off"
+    healthcheck:
+      test: ["CMD", "silo", "healthcheck", "--quiet", "ready"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
     volumes:
-      - miniodata:/data
+      - silodata:/data
+    networks: [backend]
 
-  # Creates the bucket once MinIO is reachable, then exits.
   createbucket:
-    image: minio/mc
-    depends_on: [minio]
-    entrypoint: >
-      sh -c "until mc alias set local http://minio:9000 minio minio12345; do sleep 1; done &&
-             mc mb -p local/lore-fragments && echo 'bucket ready'"
+    image: pgsty/silo:RELEASE.2026-08-06T00-00-00Z@sha256:29a498b24669cae1fed11c1a2fb2b3d73c68829a0a9c0b14e71b386671d38fac
+    depends_on:
+      silo:
+        condition: service_healthy
+    environment:
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY:?render deploy/oh/.env first}
+      S3_SECRET_KEY: ${S3_SECRET_KEY:?render deploy/oh/.env first}
+    entrypoint: ["/bin/sh", "-ec"]
+    # Bucket creation is deliberately idempotent so every compose up proves S3 access.
+    command:
+      - |
+        mcli alias set local http://silo:9000 "$${S3_ACCESS_KEY}" "$${S3_SECRET_KEY}"
+        mcli mb --ignore-existing local/lore-fragments
+    restart: "no"
+    networks: [backend]
 
   loreserver:
+    image: lore-stack:v0.9.0
     build:
       context: .
-      dockerfile: Dockerfile        # COPYs dist/loreserver-${TARGETARCH}; run scripts/compose-up.sh first
+      dockerfile: Dockerfile
+    restart: unless-stopped
     depends_on:
       postgres:
         condition: service_healthy
@@ -50,16 +64,23 @@ services:
         condition: service_completed_successfully
     environment:
       LORE_CONFIG_PATH: /config
-      AWS_ACCESS_KEY_ID: minio
-      AWS_SECRET_ACCESS_KEY: minio12345
+      AWS_ACCESS_KEY_ID: ${S3_ACCESS_KEY:?render deploy/oh/.env first}
+      AWS_SECRET_ACCESS_KEY: ${S3_SECRET_KEY:?render deploy/oh/.env first}
       AWS_REGION: us-east-1
+      LORE__PLUGINS__PG__DSN: host=postgres port=5432 user=lore password=${POSTGRES_PASSWORD:?render deploy/oh/.env first} dbname=lore sslmode=disable
     volumes:
       - ./config/compose.toml:/config/local.toml:ro
     ports:
-      - "41337:41337/tcp"   # gRPC
-      - "41337:41337/udp"   # QUIC (push/clone) — UDP, must be published
-      - "41339:41339/tcp"   # HTTP health: /health_check
+      - "${LORE_BIND_IP:-127.0.0.1}:41337:41337/tcp"
+      - "${LORE_BIND_IP:-127.0.0.1}:41337:41337/udp"
+      - "127.0.0.1:41339:41339/tcp"
+    networks: [backend, edge]
+
+networks:
+  backend:
+    internal: true
+  edge:
 
 volumes:
   pgdata:
-  miniodata:
+  silodata:

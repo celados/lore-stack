@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build a custom loreserver by overlaying our Postgres + R2 storage plugin onto a
+# Build a custom loreserver by overlaying our Postgres + S3 storage plugin onto a
 # pinned upstream Lore checkout. See ../docs/design.md ("Plugin build model").
 #
 # Phases (so CI can insert rust-cache between fetch and build):
@@ -7,11 +7,9 @@
 #   build.sh build   # cargo build (assumes fetched)
 #   build.sh         # both (local use)
 #
-# Until overlay/pg.rs and the lore-pg rewrite land, this builds a STOCK loreserver
-# from the pinned source — proving the fetch+build pipeline (design Phase 2).
 set -euo pipefail
 
-LORE_TAG="${LORE_TAG:-v0.8.6}"                 # server/client release baseline
+LORE_TAG="${LORE_TAG:-v0.9.0}"                 # server/client release baseline
 LORE_REPO="${LORE_REPO:-https://github.com/EpicGames/lore.git}"
 TARGET="${TARGET:-x86_64-unknown-linux-gnu}"   # server runs on Linux only
 
@@ -63,7 +61,8 @@ srv.write_text(s)
 print("wired lore-pg into workspace members + dependencies")
 PY
   else
-    echo ">> overlay/pg.rs absent — STOCK loreserver (pipeline proof only)"
+    echo ">> overlay/pg.rs absent — refusing to build a server without the required plugin"
+    exit 1
   fi
 }
 
@@ -71,7 +70,7 @@ do_build() {
   echo ">> building loreserver ($TARGET)"
   cd "$SRC"
   rustup target add "$TARGET" 2>/dev/null || true
-  cargo build --release -p lore-server --bin loreserver --target "$TARGET" \
+  LORE_BUILD_VERSION_NAME="$LORE_TAG" cargo build --release -p lore-server --bin loreserver --target "$TARGET" \
     --target-dir "$CARGO_TARGET_DIR"
   strip "$CARGO_TARGET_DIR/$TARGET/release/loreserver" 2>/dev/null || true
   mkdir -p "$ROOT/dist"
