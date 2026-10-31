@@ -15,15 +15,14 @@ Vaultwarden and are rendered only on the operator and OH hosts.
 
 ## Supported baseline
 
-- Upstream source: [`EpicGames/lore` tag `v0.9.0`](https://github.com/EpicGames/lore/releases/tag/v0.9.0).
+- Upstream source: [`EpicGames/lore` tag `v0.12.0`](https://github.com/EpicGames/lore/releases/tag/v0.12.0).
 - Upgrade policy: clean re-overlay onto the pinned tag; no compatibility shim for
   older Lore storage traits.
 - `scripts/build.sh` always overlays `lore-pg` and `overlay/pg.rs`; a missing
   plugin is a build error rather than a silent stock-server fallback.
-- Upstream's `v0.9.0` tag still declares Cargo package version
-  `0.8.7-nightly`. The custom build injects `LORE_BUILD_VERSION_NAME=v0.9.0`,
-  so server startup reports the complete identity `0.8.7-nightly+v0.9.0` even
-  though Clap's short `--version` output shows only the package version.
+- Upstream's `v0.12.0` tag still declares Cargo package version `0.11.1-nightly`.
+  `scripts/build.sh` runs `lore-stamp --build <tag>`, so the build name is written
+  into the binary, while Clap's short `--version` output shows only the package version.
 
 ## Storage boundary
 
@@ -102,3 +101,7 @@ the installed 0.8.6 client completed create, commit, push, clone, and byte-level
 comparison through the Tailscale address. A full PostgreSQL, Silo, and Lore
 restart preserved the pushed revision. DNS cutover and HZ drain remain separate
 operations.
+
+The 0.12.0 upgrade passed the gate on 2026-10-31: all 21 PG/S3 tests, then a side
+stack restored from the production backup, where a 0.12 clone matched a 0.9-server
+clone byte for byte and both 0.9 and 0.12 clients pushed and synced across a restart.

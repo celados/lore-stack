@@ -8,7 +8,7 @@ store**.
 - Lore is **vendored/overlaid, not forked wholesale** — see the design doc's
   *Plugin build model*. Authored storage code lives in `lore-pg/`, factory glue in
   `overlay/pg.rs`, and the build recipe overlays both onto a pinned Lore checkout.
-- Pinned upstream: **Lore 0.9.0**.
+- Pinned upstream: **Lore 0.12.0**.
 - **Clean-break on upgrades:** re-overlay onto the new tag, don't carry shims.
 - The root Compose file is the deployment contract for OH. PostgreSQL and Silo
   stay on its internal Docker network; only Lore binds the Tailscale address.

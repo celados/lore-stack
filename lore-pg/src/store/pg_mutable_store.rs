@@ -13,6 +13,7 @@ use lore_base::types::Partition;
 use lore_storage::KeyValueStream;
 use lore_storage::MutableStore as MutableStoreTrait;
 use lore_storage::StoreError;
+use lore_storage::local::store_lock::StoreGuard;
 use serde::Deserialize;
 use tracing::debug;
 use tracing::warn;
@@ -359,6 +360,11 @@ fn hash_from_bytes(bytes: &[u8]) -> Result<Hash, StoreError> {
 
 #[async_trait]
 impl MutableStoreTrait for PgMutableStore {
+    async fn hold_for_command(self: Arc<Self>) -> Result<Option<StoreGuard>, StoreError> {
+        // Postgres holds nothing on this host's disk to claim.
+        Ok(None)
+    }
+
     async fn load(
         self: Arc<Self>,
         partition: Partition,
