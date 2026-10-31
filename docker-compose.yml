@@ -52,7 +52,7 @@ services:
     networks: [backend]
 
   loreserver:
-    image: lore-stack:v0.9.0
+    image: lore-stack:v0.12.0
     build:
       context: .
       dockerfile: Dockerfile

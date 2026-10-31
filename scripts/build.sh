@@ -9,7 +9,7 @@
 #
 set -euo pipefail
 
-LORE_TAG="${LORE_TAG:-v0.9.0}"                 # server/client release baseline
+LORE_TAG="${LORE_TAG:-v0.12.0}"                 # server/client release baseline
 LORE_REPO="${LORE_REPO:-https://github.com/EpicGames/lore.git}"
 TARGET="${TARGET:-x86_64-unknown-linux-gnu}"   # server runs on Linux only
 
@@ -22,21 +22,6 @@ do_fetch() {
   echo ">> fetching lore @ $LORE_TAG"
   rm -rf "$SRC"; mkdir -p "$BUILD"
   git clone --depth 1 --branch "$LORE_TAG" "$LORE_REPO" "$SRC"
-
-  # Upstream hardcodes the aarch64 CPU to neoverse-512tvb (Graviton3+, armv8.4)
-  # in TWO kinds of places: .cargo/config.toml rustflags AND lore-base/build.rs's
-  # cc flag for rpmalloc — C allocator code that runs before main(), so a wrong
-  # -mcpu SIGILLs (stlur, armv8.4 LRCPC2) at startup with zero logs on any
-  # armv8.2 host (Neoverse-N1/Ampere/Graviton2; bit us on Hetzner CAX). Sweep
-  # EVERY occurrence in the tree, not just the top-level cargo config.
-  ARM64_TARGET_CPU="${ARM64_TARGET_CPU:-generic}"
-  # NB: options BEFORE the directory operand — BSD grep (macOS) silently treats
-  # trailing options as filenames, turning the sweep into a no-op.
-  grep -rl --include="*.toml" --include="*.rs" --exclude-dir=.git \
-    --exclude-dir=target "neoverse-512tvb" "$SRC" 2>/dev/null | while IFS= read -r f; do
-    sed -i.bak "s/neoverse-512tvb/$ARM64_TARGET_CPU/g" "$f" && rm -f "$f.bak"
-    echo ">> arm64 cpu repointed to '$ARM64_TARGET_CPU' in ${f#"$SRC"/}"
-  done
 
   if [ -f "$ROOT/overlay/pg.rs" ]; then
     echo ">> overlaying lore-pg crate + plugins/pg.rs + Cargo wiring"
@@ -70,9 +55,13 @@ do_build() {
   echo ">> building loreserver ($TARGET)"
   cd "$SRC"
   rustup target add "$TARGET" 2>/dev/null || true
-  LORE_BUILD_VERSION_NAME="$LORE_TAG" cargo build --release -p lore-server --bin loreserver --target "$TARGET" \
+  cargo build --release -p lore-server --bin loreserver --target "$TARGET" \
     --target-dir "$CARGO_TARGET_DIR"
   strip "$CARGO_TARGET_DIR/$TARGET/release/loreserver" 2>/dev/null || true
+  # The build name is no longer compiled in; lore-stamp writes it into the binary.
+  cargo run --release -p lore-base --bin lore-stamp --target "$TARGET" \
+    --target-dir "$CARGO_TARGET_DIR" -- --build "$LORE_TAG" \
+    "$CARGO_TARGET_DIR/$TARGET/release/loreserver"
   mkdir -p "$ROOT/dist"
   cp "$CARGO_TARGET_DIR/$TARGET/release/loreserver" "$ROOT/dist/loreserver"
   echo ">> built: $ROOT/dist/loreserver"

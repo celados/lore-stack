@@ -40,7 +40,9 @@ use lore_storage::StoreGetData;
 use lore_storage::StoreMatch;
 use lore_storage::StoreMatchResult;
 use lore_storage::StoreObliterateStats;
+use lore_storage::immutable_store::CopyBehavior;
 use lore_storage::immutable_store::sanitise_fragment_behavior_flags;
+use lore_storage::local::store_lock::StoreGuard;
 use serde::Deserialize;
 use tokio::task::JoinSet;
 use tracing::debug;
@@ -816,6 +818,11 @@ impl PgImmutableStore {
 
 #[async_trait]
 impl ImmutableStoreTrait for PgImmutableStore {
+    async fn hold_for_command(self: Arc<Self>) -> Result<Option<StoreGuard>, StoreError> {
+        // Postgres and S3 hold nothing on this host's disk to claim.
+        Ok(None)
+    }
+
     fn isolates_partitions(&self) -> bool {
         true
     }
@@ -892,6 +899,7 @@ impl ImmutableStoreTrait for PgImmutableStore {
             match_made: StoreMatch::MatchFull,
             partition,
             payload: Some(payload),
+            content: None,
         })
     }
 
@@ -1091,7 +1099,7 @@ impl ImmutableStoreTrait for PgImmutableStore {
         source_address: Address,
         destination_partition: Partition,
         destination_context: Context,
-        _durable: bool,
+        _behavior: CopyBehavior,
     ) -> Result<(), StoreError> {
         let source_repository: Context = source_partition.into();
         let destination_repository: Context = destination_partition.into();
@@ -1142,8 +1150,6 @@ impl ImmutableStoreTrait for PgImmutableStore {
     async fn compact_resume_at(self: Arc<Self>) -> Option<usize> {
         None
     }
-
-    async fn compact_stop(self: Arc<Self>) {}
 
     async fn flush(self: Arc<Self>, _sync_data: bool) -> Result<(), StoreError> {
         // Postgres writes are immediately durable; S3 puts are synchronous. Nothing to flush.
