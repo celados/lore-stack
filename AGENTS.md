@@ -18,8 +18,9 @@ store**.
   `scripts/build-linux-amd64.sh`; do not make the Mac operator host the build
   machine for OH deployments.
 - **CI build boundary:** Linux ARM64 and AMD64 binaries compile inside Docker on
-  the celados self-hosted macOS ARM64 runner. Keep release publication and image
-  assembly on GitHub-hosted runners; they are cheap glue jobs. The persistent
+  the celados self-hosted macOS ARM64 runner. Release publication runs on
+  `celados-linux-light` and image assembly on `celados-linux` (DinD through the
+  pod proxy); never a GitHub-hosted runner, which no longer starts. The persistent
   `.build/` cache is bounded by the workflow and must never enter Docker's build
   context. CI starts OrbStack explicitly because runner availability does not
   imply that its Docker daemon is already running.
